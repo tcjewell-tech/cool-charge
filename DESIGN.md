@@ -1,4 +1,4 @@
-# flight-thermal-guard — design (proposal, not built yet)
+# flight-thermal-guard — design
 
 Tray app that watches CPU temperature while the laptop is charging (usually from a
 Li-ion power bank on a plane) and, when it runs hot, offers one-click CPU throttling.
@@ -13,7 +13,7 @@ Li-ion power bank on a plane) and, when it runs hot, offers one-click CPU thrott
 | LibreHardwareMonitor | Reads the CPU's own digital thermal sensor (MSR) → per-core + package temp. Current builds use the **PawnIO** driver; the old WinRing0 driver is flagged by Defender as `VulnerableDriver:WinNT/Winring0`, so avoid any build that ships it. **Not yet tested on this laptop.** | **Yes** |
 | Charging state | `root\wmi BatteryStatus`: `PowerOnline`, `Charging`, `ChargeRate` (mW). At probe time: online, charging at 19.4 W, battery at 22 %. | No |
 | Power bank vs wall? | **Not distinguishable.** Both arrive as USB-C PD "AC power". Windows doesn't reliably report the negotiated wattage. | — |
-| Throttle lever | `powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMAX <n>` + `powercfg /setactive SCHEME_CURRENT`. Tested a no-op write (100→100): **works without admin**. Only plan installed: Balanced. Current AC power-mode overlay `961cc777…` (believed to be "Best power efficiency"). | No |
+| Throttle lever (superseded, see "What throttle means") | `powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMAX <n>` + `powercfg /setactive SCHEME_CURRENT`. Tested a no-op write (100→100): **works without admin**. Only plan installed: Balanced. Current AC power-mode overlay `961cc777…` (believed to be "Best power efficiency"). | No |
 | Top CPU processes | `Process.TotalProcessorTime` sampled twice ~2 s apart → current % per process (cumulative CPU time alone is misleading). One `Get-Process` pass ≈ 0.2 s. | No |
 
 **Bottom line:** CPU temperature needs LibreHardwareMonitor, which needs admin. Everything else runs as a normal user.
@@ -26,22 +26,28 @@ CPU *package* temperature (poll every 5 s, 6 samples), never single samples.
 | State | Enter when | Leave when | Action |
 |---|---|---|---|
 | Normal | — | avg ≥ 85 °C | Tray icon shows temp only |
-| Warm | avg ≥ 85 °C | avg ≤ 75 °C for 2 min | Prompt once: **Cap CPU** / **Show top processes** / **Snooze 15 min** |
+| Warm | avg ≥ 85 °C | avg ≤ 75 °C for 2 min | Prompt: **Turn Turbo Boost off** / **Show top processes** / **Snooze 15 min** |
 | Hot | avg ≥ 92 °C | avg ≤ 85 °C | Prompt again even if snoozed |
 | Cooled (after a cap) | Back to Normal with cap active | — | Prompt: **Restore full speed?** |
 
 A 10 °C gap plus the 2-min hold is the hysteresis, so it can't flap around one number.
 Monitoring and prompts run **only while `PowerOnline` is true** (the case that loads the power bank).
 
-## What "throttle" means
+## What "throttle" means (revised after measuring, 2026-11-25)
 
-1. **Cap CPU at 99 %** of max processor state. On Intel, anything below 100 % switches Turbo Boost off. That is the
-   biggest single cut in heat and watts drawn from the pack, and you barely notice it for normal work.
-2. **Cap at 70 %**: stronger option, offered when Hot.
-3. **Show top processes**: the top 5 by current CPU %, with a kill button *only* after a confirm.
-4. **Restore**: put back the value saved before capping (normally 100). Also restored on app exit.
+The original plan was to cap "Maximum processor state" (PROCTHROTTLEMAX) at 99 % or 70 %. **Measured on this laptop,
+that setting does nothing**: the same amount of work got done in 5 s at 100 %, 30 % and 5 %. Energy preference
+(PERFEPP 100) and switching off autonomous mode did nothing either. The laptop's firmware and Intel's thermal
+service (`esifsvc`) decide the speed.
 
-Only the AC value is touched, so battery-only behaviour stays exactly as it was.
+The one setting that worked is **"Processor performance boost mode" (PERFBOOSTMODE) = 0**, i.e. Turbo Boost off:
+real work dropped about 17 % (243 -> 202 units). So the app has a single action:
+
+1. **Turn Turbo Boost off** (AC value only, original saved to disk first).
+2. **Show top processes**: the top 5 by current CPU %, with a kill button *only* after a confirm.
+3. **Restore full speed**: put back the saved value. Also on Exit, logoff and shutdown.
+
+Not measured yet: how many degrees or watts Turbo Boost off actually saves under real load.
 
 ## Proposed stack (minimal)
 
