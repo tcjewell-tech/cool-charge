@@ -15,7 +15,10 @@ acts when you click.
     dotnet build -c Release
     bin\Release\net8.0-windows\FlightThermalGuard.exe
 
-Start it from an elevated prompt (or use the autostart task below). Look for the icon in the tray.
+Start it from an elevated prompt (or use the autostart task below). The tray icon is a coloured square showing the
+temperature. Windows 11 hides new tray icons: look behind the `^` arrow next to the clock, and drag the icon onto the
+taskbar to keep it in view. Windows remembers that per program location, so the installed copy needs it once too.
+Prompts appear on top of other windows whether or not the icon is visible.
 
 ## Autostart
 
