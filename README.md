@@ -13,7 +13,7 @@ acts when you click.
 ## Build and run
 
     dotnet build -c Release
-    bin\Release\net8.0-windows\FlightThermalGuard.exe
+    bin\Release\net8.0-windows\win-x64\FlightThermalGuard.exe
 
 Start it from an elevated prompt (or use the autostart task below). The tray icon is a coloured square showing the
 temperature. Windows 11 hides new tray icons: look behind the `^` arrow next to the clock, and drag the icon onto the

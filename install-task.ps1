@@ -7,7 +7,7 @@
 .PARAMETER Uninstall
     Remove the task instead of installing it.
 .PARAMETER ExePath
-    Path to the built FlightThermalGuard.exe. Default: bin\Release\net8.0-windows\FlightThermalGuard.exe next to
+    Path to the built FlightThermalGuard.exe. Default: bin\Release\net8.0-windows\win-x64\FlightThermalGuard.exe next to
     this script. Its whole folder is copied to "Program Files\FlightThermalGuard" and the task runs that copy,
     so re-run this script after every rebuild.
 .EXAMPLE
@@ -17,10 +17,15 @@
 [CmdletBinding()]
 param(
     [switch]$Uninstall,
-    [string]$ExePath = (Join-Path $PSScriptRoot 'bin\Release\net8.0-windows\FlightThermalGuard.exe')
+    [string]$ExePath
 )
 
 $ErrorActionPreference = 'Stop'
+# Worked out here, not as a param() default: under Windows PowerShell 5.1 $PSScriptRoot was empty there.
+if (-not $ExePath) {
+    $root = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    $ExePath = Join-Path $root 'bin\Release\net8.0-windows\win-x64\FlightThermalGuard.exe'
+}
 $TaskName = 'FlightThermalGuard'
 $InstallDir = Join-Path $env:ProgramFiles 'FlightThermalGuard'
 
@@ -64,7 +69,7 @@ $exe = (Resolve-Path -LiteralPath $ExePath).ProviderPath
 if ([IO.Path]::GetExtension($exe) -ne '.exe') { Stop-WithError "Not an .exe file: $exe" }
 # The whole folder gets copied into Program Files, so make sure it really is this app's build output.
 if ((Split-Path -Leaf $exe) -ne 'FlightThermalGuard.exe' -or
-    -not (Test-Path -LiteralPath (Join-Path (Split-Path -LiteralPath $exe -Parent) 'FlightThermalGuard.dll') -PathType Leaf)) {
+    -not (Test-Path -LiteralPath (Join-Path ([IO.Path]::GetDirectoryName($exe)) 'FlightThermalGuard.dll') -PathType Leaf)) {
     Stop-WithError "Not a Flight Thermal Guard build folder (needs FlightThermalGuard.exe and .dll): $exe"
 }
 # Replacing the files of a running copy would fail halfway and leave a broken install behind.
@@ -78,7 +83,7 @@ if ($exe.Contains('%')) { Stop-WithError "Path contains '%' (Task Scheduler woul
 # into Program Files, which only administrators can modify, and run that copy.
 try {
     if (Test-Path -LiteralPath $InstallDir) { Remove-Item -LiteralPath $InstallDir -Recurse -Force }
-    Copy-Item -LiteralPath (Split-Path -LiteralPath $exe -Parent) -Destination $InstallDir -Recurse -Force
+    Copy-Item -LiteralPath ([IO.Path]::GetDirectoryName($exe)) -Destination $InstallDir -Recurse -Force
 } catch {
     Stop-WithError "Could not copy the app to $InstallDir (exit Flight Thermal Guard from its tray icon first): $($_.Exception.Message)"
 }
@@ -87,7 +92,7 @@ $exe = Join-Path $InstallDir (Split-Path -Leaf $exe)
 $user = $identity.Name   # DOMAIN\user of this elevated session
 try {
     # Quoted path, no arguments: the task cannot run anything but this one file.
-    $action    = New-ScheduledTaskAction -Execute ('"{0}"' -f $exe) -WorkingDirectory (Split-Path -LiteralPath $exe -Parent)
+    $action    = New-ScheduledTaskAction -Execute ('"{0}"' -f $exe) -WorkingDirectory ([IO.Path]::GetDirectoryName($exe))
     $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $user
     $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
