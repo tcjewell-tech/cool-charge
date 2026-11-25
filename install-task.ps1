@@ -37,6 +37,11 @@ if (-not $isAdmin) {
     Stop-WithError 'Not running as administrator. Open PowerShell with "Run as administrator" and run this script again.'
 }
 
+# Removing the installed folder would delete the record of the original Turbo Boost setting.
+if (Test-Path -LiteralPath (Join-Path $InstallDir 'saved-boost-mode.txt')) {
+    Stop-WithError 'Turbo Boost is still off from the app. Start Flight Thermal Guard, choose "Restore full speed", exit it, then run this script again.'
+}
+
 if ($Uninstall) {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false

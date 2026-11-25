@@ -8,7 +8,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Windows x64 only: keeps the Linux/macOS/Android native folders out of the output that gets installed -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>false</SelfContained>
+    <!-- The app runs elevated from the user's session. Self-contained so it can't be pointed at another .NET
+         runtime through DOTNET_ROOT, and no startup hooks so DOTNET_STARTUP_HOOKS can't load code into it. -->
+    <SelfContained>true</SelfContained>
+    <StartupHookSupport>false</StartupHookSupport>
   </PropertyGroup>
 
   <ItemGroup>

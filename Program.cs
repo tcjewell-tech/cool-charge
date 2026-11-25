@@ -381,9 +381,9 @@ sealed class TrayApp : ApplicationContext
     {
         try
         {
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FlightThermalGuard");
-            Directory.CreateDirectory(dir);
-            File.AppendAllText(Path.Combine(dir, "log.txt"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {message}{Environment.NewLine}");
+            Directory.CreateDirectory(Throttle.StateDir);
+            string line = message.ReplaceLineEndings(" "); // process names and exception text must stay on one line
+            File.AppendAllText(Path.Combine(Throttle.StateDir, "log.txt"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {line}{Environment.NewLine}");
         }
         catch { }
     }

@@ -6,7 +6,7 @@ acts when you click.
 
 ## Requirements
 
-- Windows 11 and .NET 8 (the SDK to build, the runtime to run).
+- Windows 11 and the .NET 8 SDK to build. The built app carries its own .NET runtime.
 - The PawnIO driver, which lets the temperature library read the CPU sensor: `winget install namazso.PawnIO`
 - It must run as administrator to read the CPU temperature. Without admin the tray shows no reading.
 
@@ -56,8 +56,9 @@ value, even 5 %.
 
 "Restore full speed" puts back the value that was saved before. The app also restores it when you choose Exit and at
 logoff or shutdown. After a crash or a kill Turbo Boost stays off; the next start shows a warning, and "Restore full
-speed" in the tray menu undoes it. The original value is kept in `%LOCALAPPDATA%\FlightThermalGuard`, next to
-`log.txt` (one line per state change or action).
+speed" in the tray menu undoes it. The original value and `log.txt` (one line per state change or action) are kept
+next to the installed program in `Program Files\FlightThermalGuard` when it runs as administrator, and in
+`%LOCALAPPDATA%\FlightThermalGuard` when it does not.
 
 A prompt's default button is always "Snooze 15 min", so a stray Enter never changes a setting. While the CPU stays
 warm or hot with Turbo Boost still on, the prompt comes back every 15 minutes.

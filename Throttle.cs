@@ -13,10 +13,15 @@ public static class Throttle
     private const string Setting = "SCHEME_CURRENT SUB_PROCESSOR PERFBOOSTMODE";
     private const int BoostOff = 0, WindowsDefault = 2; // 2 = Aggressive
 
+    /// Where the saved setting and the log live. An elevated process must not write into a folder that
+    /// non-admin programs control (a planted link there could redirect the write or delete), so when elevated
+    /// it is the app's own folder (admin-only once installed to Program Files); otherwise the user's own folder.
+    internal static readonly string StateDir = Environment.IsPrivilegedProcess
+        ? AppContext.BaseDirectory
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FlightThermalGuard");
+
     // Plain text on disk so the original value survives a crash or kill while throttled.
-    private static readonly string SavedPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "FlightThermalGuard", "saved-boost-mode.txt");
+    private static readonly string SavedPath = Path.Combine(StateDir, "saved-boost-mode.txt");
 
     public static bool IsCapped => File.Exists(SavedPath);
 
