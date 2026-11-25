@@ -47,6 +47,10 @@ if (Test-Path -LiteralPath (Join-Path $InstallDir 'saved-boost-mode.txt')) {
     Stop-WithError 'Turbo Boost is still off from the app. Start Flight Thermal Guard, choose "Restore full speed", exit it, then run this script again.'
 }
 
+# A running copy locks its files, so replacing or removing them would fail halfway. Stop it first.
+# Safe to kill: the check above proved Turbo Boost is not off, so it has nothing to restore on exit.
+Get-Process -Name FlightThermalGuard -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); [void]$_.WaitForExit(5000) }
+
 if ($Uninstall) {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
@@ -71,10 +75,6 @@ if ([IO.Path]::GetExtension($exe) -ne '.exe') { Stop-WithError "Not an .exe file
 if ((Split-Path -Leaf $exe) -ne 'FlightThermalGuard.exe' -or
     -not (Test-Path -LiteralPath (Join-Path ([IO.Path]::GetDirectoryName($exe)) 'FlightThermalGuard.dll') -PathType Leaf)) {
     Stop-WithError "Not a Flight Thermal Guard build folder (needs FlightThermalGuard.exe and .dll): $exe"
-}
-# Replacing the files of a running copy would fail halfway and leave a broken install behind.
-if (Get-Process -Name FlightThermalGuard -ErrorAction SilentlyContinue) {
-    Stop-WithError 'Flight Thermal Guard is running. Exit it from its tray icon, then run this script again.'
 }
 if ($exe.Contains('%')) { Stop-WithError "Path contains '%' (Task Scheduler would expand it as an environment variable): $exe" }
 
