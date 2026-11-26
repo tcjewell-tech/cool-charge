@@ -42,14 +42,21 @@ if (-not $isAdmin) {
     Stop-WithError 'Not running as administrator. Open PowerShell with "Run as administrator" and run this script again.'
 }
 
-# Removing the installed folder would delete the record of the original Turbo Boost setting.
-if (Test-Path -LiteralPath (Join-Path $InstallDir 'saved-boost-mode.txt')) {
-    Stop-WithError 'Turbo Boost is still off from the app. Start CoolCharge, choose "Restore full speed", exit it, then run this script again.'
-}
-
 # A running copy locks its files, so replacing or removing them would fail halfway. Stop it first.
-# Safe to kill: the check above proved Turbo Boost is not off, so it has nothing to restore on exit.
 Get-Process -Name CoolCharge -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); [void]$_.WaitForExit(5000) }
+
+# The killed app could not restore Turbo Boost, and removing the folder would delete the record of the
+# original setting. So do the app's "Restore full speed" here: same setting, same saved value.
+$saved = Join-Path $InstallDir 'saved-boost-mode.txt'
+if (Test-Path -LiteralPath $saved) {
+    $mode = "$(Get-Content -LiteralPath $saved -TotalCount 1)".Trim()
+    if ($mode -notmatch '^[0-6]$') { $mode = '2' }   # same fallback as the app: Windows default
+    & powercfg.exe /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PERFBOOSTMODE $mode
+    if ($LASTEXITCODE -eq 0) { & powercfg.exe /setactive SCHEME_CURRENT }
+    if ($LASTEXITCODE -ne 0) { Stop-WithError 'Could not restore Turbo Boost (powercfg failed). Nothing was removed.' }
+    Remove-Item -LiteralPath $saved -Force
+    Write-Host 'Turbo Boost was off from the app; restored it to its original setting.'
+}
 
 if ($Uninstall) {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {

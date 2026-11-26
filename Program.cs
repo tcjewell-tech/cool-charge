@@ -75,7 +75,7 @@ sealed class TrayApp : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add(_status);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(CapLabel, null, (_, _) => ApplyCap());
+        var capItem = menu.Items.Add(CapLabel, null, (_, _) => ApplyCap());
         _restoreItem.Click += (_, _) => RestoreCap();
         menu.Items.Add(_restoreItem);
         menu.Items.Add("Show top processes", null, (_, _) => ShowTopProcesses());
@@ -87,7 +87,8 @@ sealed class TrayApp : ApplicationContext
         }
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
-        menu.Opening += (_, _) => _restoreItem.Enabled = Throttle.IsCapped;
+        // Only the action that can do something is clickable: off can't be turned off twice.
+        menu.Opening += (_, _) => capItem.Enabled = !(_restoreItem.Enabled = Throttle.IsCapped);
         _tray.ContextMenuStrip = menu;
 
         Log($"start (admin={IsAdmin()}, simulate={simulate?.ToString(CultureInfo.InvariantCulture) ?? "off"}, capped={Throttle.IsCapped})");
