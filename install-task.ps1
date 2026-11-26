@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-    Registers (or removes) the scheduled task that starts Flight Thermal Guard at logon.
+    Registers (or removes) the scheduled task that starts CoolCharge at logon.
 .DESCRIPTION
     Run from an elevated PowerShell. The task starts the exe when the CURRENT user logs on, elevated
     (RunLevel Highest, so the CPU temperature can be read) but inside that user's session (so the tray icon shows).
 .PARAMETER Uninstall
     Remove the task instead of installing it.
 .PARAMETER ExePath
-    Path to the built FlightThermalGuard.exe. Default: bin\Release\net8.0-windows\win-x64\FlightThermalGuard.exe next to
-    this script. Its whole folder is copied to "Program Files\FlightThermalGuard" and the task runs that copy,
+    Path to the built CoolCharge.exe. Default: bin\Release\net8.0-windows\win-x64\CoolCharge.exe next to
+    this script. Its whole folder is copied to "Program Files\CoolCharge" and the task runs that copy,
     so re-run this script after every rebuild.
 .EXAMPLE
     .\install-task.ps1
@@ -24,10 +24,10 @@ $ErrorActionPreference = 'Stop'
 # Worked out here, not as a param() default: under Windows PowerShell 5.1 $PSScriptRoot was empty there.
 if (-not $ExePath) {
     $root = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-    $ExePath = Join-Path $root 'bin\Release\net8.0-windows\win-x64\FlightThermalGuard.exe'
+    $ExePath = Join-Path $root 'bin\Release\net8.0-windows\win-x64\CoolCharge.exe'
 }
-$TaskName = 'FlightThermalGuard'
-$InstallDir = Join-Path $env:ProgramFiles 'FlightThermalGuard'
+$TaskName = 'CoolCharge'
+$InstallDir = Join-Path $env:ProgramFiles 'CoolCharge'
 
 function Stop-WithError([string]$Message) {
     [Console]::Error.WriteLine("ERROR: $Message")
@@ -44,12 +44,12 @@ if (-not $isAdmin) {
 
 # Removing the installed folder would delete the record of the original Turbo Boost setting.
 if (Test-Path -LiteralPath (Join-Path $InstallDir 'saved-boost-mode.txt')) {
-    Stop-WithError 'Turbo Boost is still off from the app. Start Flight Thermal Guard, choose "Restore full speed", exit it, then run this script again.'
+    Stop-WithError 'Turbo Boost is still off from the app. Start CoolCharge, choose "Restore full speed", exit it, then run this script again.'
 }
 
 # A running copy locks its files, so replacing or removing them would fail halfway. Stop it first.
 # Safe to kill: the check above proved Turbo Boost is not off, so it has nothing to restore on exit.
-Get-Process -Name FlightThermalGuard -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); [void]$_.WaitForExit(5000) }
+Get-Process -Name CoolCharge -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); [void]$_.WaitForExit(5000) }
 
 if ($Uninstall) {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -60,7 +60,7 @@ if ($Uninstall) {
     }
     if (Test-Path -LiteralPath $InstallDir) {
         try { Remove-Item -LiteralPath $InstallDir -Recurse -Force; Write-Host "Removed $InstallDir." }
-        catch { Stop-WithError "Could not remove $InstallDir (exit Flight Thermal Guard from its tray icon first): $($_.Exception.Message)" }
+        catch { Stop-WithError "Could not remove $InstallDir (exit CoolCharge from its tray icon first): $($_.Exception.Message)" }
     }
     exit 0
 }
@@ -72,9 +72,9 @@ if (-not (Test-Path -LiteralPath $ExePath -PathType Leaf)) {
 $exe = (Resolve-Path -LiteralPath $ExePath).ProviderPath
 if ([IO.Path]::GetExtension($exe) -ne '.exe') { Stop-WithError "Not an .exe file: $exe" }
 # The whole folder gets copied into Program Files, so make sure it really is this app's build output.
-if ((Split-Path -Leaf $exe) -ne 'FlightThermalGuard.exe' -or
-    -not (Test-Path -LiteralPath (Join-Path ([IO.Path]::GetDirectoryName($exe)) 'FlightThermalGuard.dll') -PathType Leaf)) {
-    Stop-WithError "Not a Flight Thermal Guard build folder (needs FlightThermalGuard.exe and .dll): $exe"
+if ((Split-Path -Leaf $exe) -ne 'CoolCharge.exe' -or
+    -not (Test-Path -LiteralPath (Join-Path ([IO.Path]::GetDirectoryName($exe)) 'CoolCharge.dll') -PathType Leaf)) {
+    Stop-WithError "Not a CoolCharge build folder (needs CoolCharge.exe and .dll): $exe"
 }
 if ($exe.Contains('%')) { Stop-WithError "Path contains '%' (Task Scheduler would expand it as an environment variable): $exe" }
 
@@ -85,7 +85,7 @@ try {
     if (Test-Path -LiteralPath $InstallDir) { Remove-Item -LiteralPath $InstallDir -Recurse -Force }
     Copy-Item -LiteralPath ([IO.Path]::GetDirectoryName($exe)) -Destination $InstallDir -Recurse -Force
 } catch {
-    Stop-WithError "Could not copy the app to $InstallDir (exit Flight Thermal Guard from its tray icon first): $($_.Exception.Message)"
+    Stop-WithError "Could not copy the app to $InstallDir (exit CoolCharge from its tray icon first): $($_.Exception.Message)"
 }
 $exe = Join-Path $InstallDir (Split-Path -Leaf $exe)
 
@@ -98,7 +98,7 @@ try {
     $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
                     -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal `
-        -Settings $settings -Description 'Flight Thermal Guard tray app (CPU temperature watcher), started at logon.' -Force | Out-Null
+        -Settings $settings -Description 'CoolCharge tray app (CPU temperature watcher), started at logon.' -Force | Out-Null
 } catch {
     Stop-WithError "Could not register the task: $($_.Exception.Message)"
 }

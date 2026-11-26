@@ -1,4 +1,4 @@
-namespace FlightThermalGuard;
+namespace CoolCharge;
 
 public enum ThermalState { Normal, Warm, Hot }
 

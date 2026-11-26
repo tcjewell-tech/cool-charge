@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 
-namespace FlightThermalGuard;
+namespace CoolCharge;
 
 static class Program
 {
@@ -19,7 +19,7 @@ static class Program
             if (i + 1 >= args.Length ||
                 !double.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out double t) || !double.IsFinite(t))
             {
-                MessageBox.Show("Usage: FlightThermalGuard.exe [--selftest] [--simulate <tempC>]", "Flight Thermal Guard");
+                MessageBox.Show("Usage: CoolCharge.exe [--selftest] [--simulate <tempC>]", "CoolCharge");
                 return 2;
             }
             simulate = t;
@@ -28,7 +28,7 @@ static class Program
         Mutex mutex;
         bool first;
         // An elevated instance owns the mutex with an admin-only ACL, so a non-elevated second start can't even open it.
-        try { mutex = new Mutex(true, "FlightThermalGuard.SingleInstance", out first); }
+        try { mutex = new Mutex(true, "CoolCharge.SingleInstance", out first); }
         catch (UnauthorizedAccessException) { return 0; }
         using var _ = mutex;
         if (!first) return 0;
@@ -44,7 +44,7 @@ static class Program
 
 sealed class TrayApp : ApplicationContext
 {
-    const string Title = "Flight Thermal Guard";
+    const string Title = "CoolCharge";
     const string CapLabel = "Turn Turbo Boost off";
     const int PollMs = 5000;
     static readonly TimeSpan Snooze = TimeSpan.FromMinutes(15);

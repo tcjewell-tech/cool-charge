@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace FlightThermalGuard;
+namespace CoolCharge;
 
 public static class TopProcesses
 {
