@@ -49,7 +49,18 @@ real work dropped about 17 % (243 -> 202 units). So the app has a single action:
 2. **Show top processes**: the top 5 by current CPU %, with a kill button *only* after a confirm.
 3. **Restore full speed**: put back the saved value. Also on Exit, logoff and shutdown.
 
-Not measured yet: how many degrees or watts Turbo Boost off actually saves under real load.
+Measured 2026-11-26 (all 8 threads loaded for 2.5 min, plugged in, one run each, ON first):
+
+| | Turbo Boost on | Turbo Boost off |
+|---|---|---|
+| Peak CPU temperature | 99 °C | 55 °C |
+| Average CPU power | 24.2 W (48 W in the first seconds) | 10.2 W |
+| Last 90 s: temperature / power | 66 °C / 18.0 W | 45 °C / 10.3 W |
+| Work done | 1513 units | 808 units (53 %) |
+
+With Turbo Boost on, the firmware itself pulled the CPU back from 48 W to about 15 W over the run, so the gap
+narrows on long sustained loads; the big win is removing the 97-99 °C opening spike. Off, the CPU held about
+10 W and 45 °C throughout, at roughly half the speed.
 
 ## Proposed stack (minimal)
 

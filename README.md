@@ -51,7 +51,8 @@ Details and reasoning are in [DESIGN.md](DESIGN.md).
 ## What the throttle does
 
 "Turn Turbo Boost off" sets the plugged-in "Processor performance boost mode" to off. On this laptop that cut real
-CPU work by about 17 % in a test; how much it lowers temperature has not been measured yet. Only the plugged-in
+CPU work by about 17 % in a single-thread test. Under a 2.5-minute all-core load it took the CPU from a 99 °C peak
+and 24 W average to a 55 °C peak and 10 W, at about half the speed (details in DESIGN.md). Only the plugged-in
 value is changed, so battery behaviour stays as it was.
 
 The more common "Maximum processor state" cap is not used: measured on this Latitude 7420 it had no effect at any
