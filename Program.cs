@@ -115,7 +115,7 @@ sealed class TrayApp : ApplicationContext
 
         double? temp = _simulate ?? _sensors.CpuTempC();
         bool pluggedIn = SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online;
-        string cap = _capped ? " · Turbo Boost off" : "";
+        string cap = !_capped ? "" : pluggedIn ? " · Turbo Boost off" : " · Turbo Boost off when plugged in";
 
         if (temp is not double t)
         {
@@ -253,7 +253,11 @@ sealed class TrayApp : ApplicationContext
         if (ok)
         {
             _capped = true;
-            _tray.ShowBalloonTip(5000, Title, "Turbo Boost is off while plugged in.", ToolTipIcon.Info);
+            // Only the plugged-in setting is changed, so on battery the message must not claim anything happened yet.
+            bool onBattery = SystemInformation.PowerStatus.PowerLineStatus != PowerLineStatus.Online;
+            _tray.ShowBalloonTip(5000, Title, onBattery
+                ? "Turbo Boost will be off whenever the laptop is plugged in. Nothing changes on battery."
+                : "Turbo Boost is now off while the laptop is plugged in.", ToolTipIcon.Info);
         }
         else MessageBox.Show("Could not change the power setting (powercfg failed).", Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
         return ok;
