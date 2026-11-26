@@ -250,7 +250,7 @@ sealed class TrayApp : ApplicationContext
     {
         if (_exiting) return false; // a prompt left open during Exit must not throttle again after the restore
         bool ok = Throttle.Cap();
-        Log($"turbo off -> {(ok ? "ok" : "FAILED")}");
+        Log($"turbo off -> {(ok ? "ok" : "FAILED: " + Throttle.LastError)}");
         if (ok)
         {
             _capped = true;
@@ -260,16 +260,16 @@ sealed class TrayApp : ApplicationContext
                 ? "Turbo Boost will be off whenever the laptop is plugged in. Nothing changes on battery."
                 : "Turbo Boost is now off while the laptop is plugged in.", ToolTipIcon.Info);
         }
-        else MessageBox.Show("Could not change the power setting (powercfg failed).", Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        else MessageBox.Show("Could not change the power setting. The reason is in log.txt next to the program.", Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
         return ok;
     }
 
     void RestoreCap()
     {
         bool ok = Throttle.Restore();
-        Log($"restore -> {(ok ? "ok" : "FAILED")}");
+        Log($"restore -> {(ok ? "ok" : "FAILED: " + Throttle.LastError)}");
         if (ok) { _capped = false; _tray.ShowBalloonTip(5000, Title, "Turbo Boost is back on (full speed).", ToolTipIcon.Info); }
-        else MessageBox.Show("Could not restore the power setting (powercfg failed).", Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        else MessageBox.Show("Could not restore the power setting. The reason is in log.txt next to the program.", Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 
     async void ShowTopProcesses()
@@ -355,7 +355,7 @@ sealed class TrayApp : ApplicationContext
         if (Throttle.IsCapped)
         {
             bool ok = Throttle.Restore();
-            Log($"exit: restore -> {(ok ? "ok" : "FAILED")}");
+            Log($"exit: restore -> {(ok ? "ok" : "FAILED: " + Throttle.LastError)}");
             if (!ok) MessageBox.Show("Could not restore the power setting; Turbo Boost is still off. Start the app again and choose \"Restore full speed\".", Title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         _tray.Visible = false;
