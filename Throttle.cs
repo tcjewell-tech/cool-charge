@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 
-namespace FlightThermalGuard;
+namespace CoolCharge;
 
 /// Turns Turbo Boost off/on for plugged-in use via powercfg ("Processor performance boost mode", AC value only).
 /// Measured on the Latitude 7420 (2026-11-25): boost mode 0 cut real work by ~17 %, while "Maximum processor
@@ -18,7 +18,7 @@ public static class Throttle
     /// it is the app's own folder (admin-only once installed to Program Files); otherwise the user's own folder.
     internal static readonly string StateDir = Environment.IsPrivilegedProcess
         ? AppContext.BaseDirectory
-        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FlightThermalGuard");
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CoolCharge");
 
     // Plain text on disk so the original value survives a crash or kill while throttled.
     private static readonly string SavedPath = Path.Combine(StateDir, "saved-boost-mode.txt");

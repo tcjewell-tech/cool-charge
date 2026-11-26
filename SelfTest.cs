@@ -1,6 +1,6 @@
-using static FlightThermalGuard.ThermalState;
+using static CoolCharge.ThermalState;
 
-namespace FlightThermalGuard;
+namespace CoolCharge;
 
 /// Assert-based checks for the threshold state machine. Run with `--selftest`; returns 0 when everything passes.
 /// Failures go to stderr (one line each), the summary to stdout. Monitor tests poll every 5 s like the app.

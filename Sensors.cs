@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using LibreHardwareMonitor.Hardware;
 
-namespace FlightThermalGuard;
+namespace CoolCharge;
 
 /// CPU temperature via LibreHardwareMonitor (needs admin + the PawnIO driver) and charge rate from Windows.
 /// Every method returns null instead of throwing: "no reading" is a normal state (not elevated, driver missing).

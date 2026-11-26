@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 
-namespace FlightThermalGuard;
+namespace CoolCharge;
 
 static class Program
 {
@@ -19,7 +19,7 @@ static class Program
             if (i + 1 >= args.Length ||
                 !double.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out double t) || !double.IsFinite(t))
             {
-                MessageBox.Show("Usage: FlightThermalGuard.exe [--selftest] [--simulate <tempC>]", "Flight Thermal Guard");
+                MessageBox.Show("Usage: CoolCharge.exe [--selftest] [--simulate <tempC>]", "CoolCharge");
                 return 2;
             }
             simulate = t;
@@ -28,7 +28,7 @@ static class Program
         Mutex mutex;
         bool first;
         // An elevated instance owns the mutex with an admin-only ACL, so a non-elevated second start can't even open it.
-        try { mutex = new Mutex(true, "FlightThermalGuard.SingleInstance", out first); }
+        try { mutex = new Mutex(true, "CoolCharge.SingleInstance", out first); }
         catch (UnauthorizedAccessException) { return 0; }
         using var _ = mutex;
         if (!first) return 0;
@@ -44,7 +44,7 @@ static class Program
 
 sealed class TrayApp : ApplicationContext
 {
-    const string Title = "Flight Thermal Guard";
+    const string Title = "CoolCharge";
     const string CapLabel = "Turn Turbo Boost off";
     const int PollMs = 5000;
     static readonly TimeSpan Snooze = TimeSpan.FromMinutes(15);
@@ -75,7 +75,7 @@ sealed class TrayApp : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add(_status);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(CapLabel, null, (_, _) => ApplyCap());
+        var capItem = menu.Items.Add(CapLabel, null, (_, _) => ApplyCap());
         _restoreItem.Click += (_, _) => RestoreCap();
         menu.Items.Add(_restoreItem);
         menu.Items.Add("Show top processes", null, (_, _) => ShowTopProcesses());
@@ -87,7 +87,8 @@ sealed class TrayApp : ApplicationContext
         }
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
-        menu.Opening += (_, _) => _restoreItem.Enabled = Throttle.IsCapped;
+        // Only the action that can do something is clickable: off can't be turned off twice.
+        menu.Opening += (_, _) => capItem.Enabled = !(_restoreItem.Enabled = Throttle.IsCapped);
         _tray.ContextMenuStrip = menu;
 
         Log($"start (admin={IsAdmin()}, simulate={simulate?.ToString(CultureInfo.InvariantCulture) ?? "off"}, capped={Throttle.IsCapped})");
@@ -115,7 +116,7 @@ sealed class TrayApp : ApplicationContext
 
         double? temp = _simulate ?? _sensors.CpuTempC();
         bool pluggedIn = SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online;
-        string cap = _capped ? " · Turbo Boost off" : "";
+        string cap = !_capped ? "" : pluggedIn ? " · Turbo Boost off" : " · Turbo Boost off when plugged in";
 
         if (temp is not double t)
         {
@@ -253,7 +254,11 @@ sealed class TrayApp : ApplicationContext
         if (ok)
         {
             _capped = true;
-            _tray.ShowBalloonTip(5000, Title, "Turbo Boost is off while plugged in.", ToolTipIcon.Info);
+            // Only the plugged-in setting is changed, so on battery the message must not claim anything happened yet.
+            bool onBattery = SystemInformation.PowerStatus.PowerLineStatus != PowerLineStatus.Online;
+            _tray.ShowBalloonTip(5000, Title, onBattery
+                ? "Turbo Boost will be off whenever the laptop is plugged in. Nothing changes on battery."
+                : "Turbo Boost is now off while the laptop is plugged in.", ToolTipIcon.Info);
         }
         else MessageBox.Show("Could not change the power setting (powercfg failed).", Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
         return ok;

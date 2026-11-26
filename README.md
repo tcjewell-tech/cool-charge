@@ -1,4 +1,4 @@
-# Flight Thermal Guard
+# CoolCharge
 
 A small Windows tray app that watches the CPU temperature while the laptop is plugged in (for example charging from a
 power bank on a plane). When the CPU runs hot it asks whether to cap CPU speed. It never throttles by itself; it only
@@ -13,7 +13,7 @@ acts when you click.
 ## Build and run
 
     dotnet build -c Release
-    bin\Release\net8.0-windows\win-x64\FlightThermalGuard.exe
+    bin\Release\net8.0-windows\win-x64\CoolCharge.exe
 
 Start it from an elevated prompt (or use the autostart task below). The tray icon is a coloured square showing the
 temperature. Windows 11 hides new tray icons: look behind the `^` arrow next to the clock, and drag the icon onto the
@@ -24,7 +24,7 @@ Prompts appear on top of other windows whether or not the icon is visible.
 
 From an elevated PowerShell in this folder:
 
-    .\install-task.ps1             # copies the build to Program Files\FlightThermalGuard and starts that copy at your logon, elevated, no UAC prompt (re-run after each rebuild)
+    .\install-task.ps1             # copies the build to Program Files\CoolCharge and starts that copy at your logon, elevated, no UAC prompt (re-run after each rebuild)
     .\install-task.ps1 -Uninstall  # removes it
 
 The task is created for the account running the script. Pass `-ExePath` if the exe is somewhere else.
@@ -42,9 +42,9 @@ Details and reasoning are in [DESIGN.md](DESIGN.md).
 ## Command-line flags
 
 - `--selftest` runs the built-in checks of the threshold logic and exits (0 = pass). It has no console window, so
-  pipe the output to see it: `FlightThermalGuard.exe --selftest 2>&1 | more`
+  pipe the output to see it: `CoolCharge.exe --selftest 2>&1 | more`
 - `--simulate <tempC>` uses a fake CPU temperature instead of the sensor, so you can try the prompts without heating
-  the laptop. Example: `FlightThermalGuard.exe --simulate 90`. Expect the first prompt after about 30 seconds,
+  the laptop. Example: `CoolCharge.exe --simulate 90`. Expect the first prompt after about 30 seconds,
   because the average needs 6 readings. In this mode the tray menu also has "Simulate 70 °C", "Simulate 87 °C" and
   "Simulate 94 °C" to change the fake temperature while it runs.
 
@@ -60,8 +60,8 @@ value, even 5 %.
 "Restore full speed" puts back the value that was saved before. The app also restores it when you choose Exit and at
 logoff or shutdown. After a crash or a kill Turbo Boost stays off; the next start shows a warning, and "Restore full
 speed" in the tray menu undoes it. The original value and `log.txt` (one line per state change or action) are kept
-next to the installed program in `Program Files\FlightThermalGuard` when it runs as administrator, and in
-`%LOCALAPPDATA%\FlightThermalGuard` when it does not.
+next to the installed program in `Program Files\CoolCharge` when it runs as administrator, and in
+`%LOCALAPPDATA%\CoolCharge` when it does not.
 
 A prompt's default button is always "Snooze 15 min", so a stray Enter never changes a setting. While the CPU stays
 warm or hot with Turbo Boost still on, the prompt comes back every 15 minutes.

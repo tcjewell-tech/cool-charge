@@ -1,4 +1,6 @@
-# flight-thermal-guard — design
+# CoolCharge — design
+
+Formerly "flight-thermal-guard" / Flight Thermal Guard.
 
 Tray app that watches CPU temperature while the laptop is charging (usually from a
 Li-ion power bank on a plane) and, when it runs hot, offers one-click CPU throttling.
