@@ -4,7 +4,7 @@ namespace CoolCharge;
 
 /// Assert-based checks for the threshold state machine. Run with `--selftest`; returns 0 when everything passes.
 /// Failures go to stderr (one line each), the summary to stdout. Monitor tests poll every 5 s like the app.
-public static class SelfTest
+public static partial class SelfTest
 {
     private const double Poll = 5; // seconds per sample
     private static int _checks, _failed;
@@ -13,7 +13,7 @@ public static class SelfTest
     public static int Run()
     {
         _checks = _failed = 0;
-        (string, Action)[] cases =
+        (string, Action)[] thermal =
         {
             ("Next table (boundaries, hysteresis)", NextTable),
             ("window: no average / no prompt before 6 samples", WindowFill),
@@ -27,6 +27,8 @@ public static class SelfTest
             ("noisy input around a threshold prompts once, not repeatedly", NoFlapping),
             ("Reset() clears window, timer and state", ResetClears),
         };
+        // Throttle and prompt-policy cases live in SelfTest.Throttle.cs and SelfTest.Policy.cs.
+        var cases = thermal.Concat(ThrottleCases).Concat(PolicyCases).ToArray();
         foreach (var (name, body) in cases)
         {
             _case = name;

@@ -11,6 +11,13 @@ static class Program
     static int Main(string[] args)
     {
         if (args.Contains("--selftest")) return SelfTest.Run();
+        // No UI: the installer runs this before removing the app, so a cap left by a killed instance is undone.
+        if (args.Contains("--restore"))
+        {
+            bool ok = Throttle.Restore();
+            TrayApp.Log($"--restore -> {(ok ? "ok" : "FAILED: " + Throttle.LastError)}");
+            return ok ? 0 : 1;
+        }
 
         double? simulate = null;
         int i = Array.IndexOf(args, "--simulate");
@@ -19,7 +26,7 @@ static class Program
             if (i + 1 >= args.Length ||
                 !double.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out double t) || !double.IsFinite(t))
             {
-                MessageBox.Show("Usage: CoolCharge.exe [--selftest] [--simulate <tempC>]", "CoolCharge");
+                MessageBox.Show("Usage: CoolCharge.exe [--selftest] [--restore] [--simulate <tempC>]", "CoolCharge");
                 return 2;
             }
             simulate = t;
@@ -29,12 +36,26 @@ static class Program
         bool first;
         // An elevated instance owns the mutex with an admin-only ACL, so a non-elevated second start can't even open it.
         try { mutex = new Mutex(true, "CoolCharge.SingleInstance", out first); }
-        catch (UnauthorizedAccessException) { return 0; }
+        catch (UnauthorizedAccessException) { TrayApp.Log("exit: already running elevated (single-instance mutex access denied)"); return 0; }
         using var _ = mutex;
-        if (!first) return 0;
+        if (!first) { TrayApp.Log("exit: already running (single-instance mutex is owned)"); return 0; }
+
+        // The runtime reads profiler variables before Main, so nothing here can undo them; the scheduled task sets
+        // DOTNET_EnableDiagnostics=0 at launch. Started elevated any other way, at least leave a trace.
+        if (Environment.IsPrivilegedProcess && Environment.GetEnvironmentVariable("DOTNET_EnableDiagnostics") != "0")
+        {
+            var set = Environment.GetEnvironmentVariables().Keys.Cast<string>().Where(k =>
+                k.Equals("CORECLR_ENABLE_PROFILING", StringComparison.OrdinalIgnoreCase) ||
+                k.StartsWith("CORECLR_PROFILER", StringComparison.OrdinalIgnoreCase) ||
+                (k.StartsWith("DOTNET_", StringComparison.OrdinalIgnoreCase) && k.Contains("PROFILER", StringComparison.OrdinalIgnoreCase)) ||
+                k.Equals("DOTNET_STARTUP_HOOKS", StringComparison.OrdinalIgnoreCase)).ToList();
+            TrayApp.Log("WARNING started elevated outside the scheduled task (DOTNET_EnableDiagnostics is not 0), so .NET " +
+                        "diagnostics/profiler variables were not locked out" + (set.Count > 0 ? "; set: " + string.Join(", ", set) : ""));
+        }
 
         // Without this an exception in a timer tick shows the stock crash dialog, and "Quit" there would leave a cap on.
         Application.ThreadException += (_, e) => TrayApp.Log("ERROR " + e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => TrayApp.Log("FATAL " + e.ExceptionObject);
         ApplicationConfiguration.Initialize();
         using var app = new TrayApp(simulate);
         Application.Run(app);
@@ -47,12 +68,15 @@ sealed class TrayApp : ApplicationContext
     const string Title = "CoolCharge";
     const string CapLabel = "Turn Turbo Boost off";
     const int PollMs = 5000;
-    static readonly TimeSpan Snooze = TimeSpan.FromMinutes(15);
+    // Never ended from here even if they run in the user's session: ending one can crash or log off the machine.
+    static readonly string[] CriticalNames = { "csrss", "dwm", "winlogon", "lsass", "services", "smss", "wininit", "fontdrvhost" };
 
     readonly NotifyIcon _tray = new() { Visible = true };
     readonly System.Windows.Forms.Timer _timer = new() { Interval = PollMs };
     readonly Sensors _sensors = new();
     readonly ThermalMonitor _monitor = new();
+    readonly PromptPolicy _policy = new();
+    readonly Microsoft.Win32.SessionEndingEventHandler _sessionEnding;
     readonly Stopwatch _sinceTick = Stopwatch.StartNew();
     // Invisible always-on-top owner so prompts appear above full-screen video etc.
     readonly Form _owner = new() { TopMost = true, ShowInTaskbar = false, FormBorderStyle = FormBorderStyle.None,
@@ -62,9 +86,9 @@ sealed class TrayApp : ApplicationContext
 
     double? _simulate;
     static readonly bool Admin = IsAdmin();
-    DateTime _heatPromptDue = DateTime.MaxValue;
-    bool _offerRestore, _prompting, _exiting;
-    bool _capped; // cached so the 5 s tick doesn't touch the disk
+    bool _prompting, _exiting;
+    bool? _pluggedIn; // last seen, to log changes
+    volatile bool _capped; // cached so the 5 s tick doesn't touch the disk; SessionEnding writes it (usually re-entrantly on the UI thread, inside a dialog's loop)
     IntPtr _hIcon;
     string _iconKey = "";
 
@@ -91,7 +115,8 @@ sealed class TrayApp : ApplicationContext
         menu.Opening += (_, _) => capItem.Enabled = !(_restoreItem.Enabled = Throttle.IsCapped);
         _tray.ContextMenuStrip = menu;
 
-        Log($"start (admin={IsAdmin()}, simulate={simulate?.ToString(CultureInfo.InvariantCulture) ?? "off"}, capped={Throttle.IsCapped})");
+        Log($"start (admin={IsAdmin()}, simulate={simulate?.ToString(CultureInfo.InvariantCulture) ?? "off"}, capped={Throttle.IsCapped}, " +
+            $"AC boost mode={Throttle.GetBoostMode()?.ToString() ?? "unreadable"})");
         if (simulate is null && !Admin)
             _tray.ShowBalloonTip(10000, Title, "Not running as administrator, so the CPU temperature can't be read.", ToolTipIcon.Warning);
 
@@ -100,7 +125,13 @@ sealed class TrayApp : ApplicationContext
         if (_capped)
             _tray.ShowBalloonTip(15000, Title, "Turbo Boost is still off from an earlier run. Right-click this icon and choose \"Restore full speed\" to undo it.", ToolTipIcon.Warning);
         // Logoff and shutdown skip ExitThreadCore, so restore here too.
-        Microsoft.Win32.SystemEvents.SessionEnding += (_, _) => Throttle.Restore();
+        _sessionEnding = (_, _) =>
+        {
+            bool ok = Throttle.Restore();
+            Log($"session ending: restore -> {(ok ? "ok" : "FAILED: " + Throttle.LastError)}");
+            if (ok) _capped = false;
+        };
+        Microsoft.Win32.SystemEvents.SessionEnding += _sessionEnding;
 
         _timer.Tick += (_, _) => Tick();
         _timer.Start();
@@ -112,10 +143,11 @@ sealed class TrayApp : ApplicationContext
         double elapsed = _sinceTick.Elapsed.TotalSeconds;
         _sinceTick.Restart();
         // A long gap means sleep/resume: old samples say nothing about now, and must not satisfy the cool-down hold.
-        if (elapsed > 30) StopJudging();
+        if (elapsed > 30) { Log($"sleep/resume: {elapsed:0} s since the last reading, samples dropped"); StopJudging(); }
 
         double? temp = _simulate ?? _sensors.CpuTempC();
         bool pluggedIn = SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online;
+        if (pluggedIn != _pluggedIn) { Log(pluggedIn ? "plugged in" : "on battery"); _pluggedIn = pluggedIn; }
         string cap = !_capped ? "" : pluggedIn ? " · Turbo Boost off" : " · Turbo Boost off when plugged in";
 
         if (temp is not double t)
@@ -138,14 +170,7 @@ sealed class TrayApp : ApplicationContext
         if (state != prev)
         {
             Log($"{prev} -> {state} (avg {_monitor.Average:0.0} °C)");
-            // Entering Hot always asks, even if Warm was snoozed.
-            if (state == ThermalState.Hot || prev == ThermalState.Normal) _heatPromptDue = DateTime.Now;
-            if (state == ThermalState.Normal)
-            {
-                // Only a real cool-down (Warm held below 75 °C for 2 min) offers a restore; a Reset never gets here.
-                _heatPromptDue = DateTime.MaxValue;
-                _offerRestore = Throttle.IsCapped;
-            }
+            _policy.StateChanged(prev, state, Environment.TickCount64, _capped);
         }
 
         double? watts = Sensors.ChargeWatts();
@@ -169,12 +194,10 @@ sealed class TrayApp : ApplicationContext
         _prompting = true;
         try
         {
-            var state = _monitor.State;
-            if (state != ThermalState.Normal && DateTime.Now >= _heatPromptDue) PromptHeat(state == ThermalState.Hot);
-            else if (state == ThermalState.Normal && _offerRestore)
+            switch (_policy.Next(_monitor.State, _monitor.Average, Environment.TickCount64, _capped))
             {
-                _offerRestore = false;
-                if (Throttle.IsCapped) PromptRestore();
+                case PromptPolicy.Prompt.Heat: PromptHeat(_monitor.State == ThermalState.Hot); break;
+                case PromptPolicy.Prompt.Restore: PromptRestore(); break;
             }
         }
         finally { _prompting = false; }
@@ -184,7 +207,7 @@ sealed class TrayApp : ApplicationContext
     void StopJudging()
     {
         _monitor.Reset();
-        _heatPromptDue = DateTime.MaxValue;
+        _policy.ReadingsStopped(_capped);
     }
 
     void PromptHeat(bool hot)
@@ -209,15 +232,19 @@ sealed class TrayApp : ApplicationContext
         // The prompt pops up over whatever is being typed; a stray Enter or Space must never change a setting.
         page.DefaultButton = later;
 
+        int episode = _policy.HeatShown();
         var result = ShowDialog(page);
         Log($"{(hot ? "hot" : "warm")} prompt -> {result.Text ?? "closed"}");
 
-        bool capped = result == cap && ApplyCap();
+        if (result == cap && _policy.IsStale(episode))
+        {
+            // Ticks run while the prompt is open; the answer was to a CPU that is no longer warm or no longer read.
+            Log("turbo off ignored: cooled down or readings stopped while the prompt was open");
+            _tray.ShowBalloonTip(5000, Title, "Nothing changed: the CPU cooled down or readings stopped while the prompt was open.", ToolTipIcon.Info);
+        }
+        else if (result == cap) ApplyCap();
         if (result == top) ShowTopProcesses();
-        // It may have gone from Warm to Hot while this prompt sat open; that Hot prompt is still owed.
-        if (!hot && !capped && _monitor.State == ThermalState.Hot) return;
-        // Ask again in 15 min while still warm or hot. After turning Turbo Boost off, only a new entry into Hot asks.
-        _heatPromptDue = capped ? DateTime.MaxValue : DateTime.Now + Snooze;
+        _policy.HeatClosed(episode, hot, _monitor.State, Environment.TickCount64, _capped);
     }
 
     void PromptRestore()
@@ -251,9 +278,10 @@ sealed class TrayApp : ApplicationContext
         if (_exiting) return false; // a prompt left open during Exit must not throttle again after the restore
         bool ok = Throttle.Cap();
         Log($"turbo off -> {(ok ? "ok" : "FAILED: " + Throttle.LastError)}");
+        _capped = Throttle.IsCapped; // a failed cap whose rollback failed too keeps the marker, so restore is still offered
         if (ok)
         {
-            _capped = true;
+            _policy.TurboOff(Environment.TickCount64); // from the prompt or the tray menu: no more Warm reminders
             // Only the plugged-in setting is changed, so on battery the message must not claim anything happened yet.
             bool onBattery = SystemInformation.PowerStatus.PowerLineStatus != PowerLineStatus.Online;
             _tray.ShowBalloonTip(5000, Title, onBattery
@@ -275,15 +303,16 @@ sealed class TrayApp : ApplicationContext
     async void ShowTopProcesses()
     {
         var list = new ListView { View = View.Details, FullRowSelect = true, Dock = DockStyle.Fill, MultiSelect = false };
-        list.Columns.Add("Process", 200);
-        list.Columns.Add("PID", 70);
-        list.Columns.Add("CPU %", 70);
+        // Pixel sizes are for 100 % scaling; the font scales by itself, these don't.
+        list.Columns.Add("Process", list.LogicalToDeviceUnits(200));
+        list.Columns.Add("PID", list.LogicalToDeviceUnits(70));
+        list.Columns.Add("CPU %", list.LogicalToDeviceUnits(70));
         var refresh = new Button { Text = "Refresh", AutoSize = true };
         var end = new Button { Text = "End process…", AutoSize = true };
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
         buttons.Controls.Add(end);
         buttons.Controls.Add(refresh);
-        var form = new Form { Text = "Top CPU processes (2-second sample)", TopMost = true, Size = new Size(400, 260),
+        var form = new Form { Text = "Top CPU processes (2-second sample)", TopMost = true, Size = list.LogicalToDeviceUnits(new Size(400, 260)),
                               StartPosition = FormStartPosition.CenterScreen, MinimizeBox = false, MaximizeBox = false };
         form.Controls.Add(list);
         form.Controls.Add(buttons);
@@ -310,8 +339,10 @@ sealed class TrayApp : ApplicationContext
             {
                 using var p = Process.GetProcessById((int)item.Tag!);
                 using var me = Process.GetCurrentProcess();
-                // This app runs elevated, so refuse Windows' own processes (session 0): ending one can crash the machine.
-                if (p.SessionId != me.SessionId)
+                // This app runs elevated, so refuse Windows' own processes (session 0, the critical ones in this
+                // session, and any Windows marks critical; if that can't be read, refuse too): ending one can crash the machine.
+                if (p.SessionId != me.SessionId || CriticalNames.Contains(p.ProcessName, StringComparer.OrdinalIgnoreCase) ||
+                    !IsProcessCritical(p.SafeHandle, out bool critical) || critical)
                     MessageBox.Show(form, $"{item.Text} is a Windows system process and can't be ended from here.", Title);
                 // The PID could have been reused since the sample; only kill if it is still the same program.
                 else if (p.ProcessName == item.Text) { p.Kill(); Log($"ended {item.Text} ({item.Tag})"); }
@@ -370,6 +401,7 @@ sealed class TrayApp : ApplicationContext
             _tray.Dispose();
             _owner.Dispose();
             _sensors.Dispose();
+            Microsoft.Win32.SystemEvents.SessionEnding -= _sessionEnding; // static event: it would keep this alive
             if (_hIcon != IntPtr.Zero) DestroyIcon(_hIcon);
         }
         base.Dispose(disposing);
@@ -388,11 +420,17 @@ sealed class TrayApp : ApplicationContext
         {
             Directory.CreateDirectory(Throttle.StateDir);
             string line = message.ReplaceLineEndings(" "); // process names and exception text must stay on one line
-            File.AppendAllText(Path.Combine(Throttle.StateDir, "log.txt"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {line}{Environment.NewLine}");
+            lock (LogGate) // SessionEnding and UnhandledException log from other threads
+                File.AppendAllText(Path.Combine(Throttle.StateDir, "log.txt"), $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {line}{Environment.NewLine}");
         }
         catch { }
     }
+    static readonly object LogGate = new();
 
     [DllImport("user32.dll")]
     static extern bool DestroyIcon(IntPtr handle);
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool IsProcessCritical(Microsoft.Win32.SafeHandles.SafeProcessHandle process, [MarshalAs(UnmanagedType.Bool)] out bool critical);
 }

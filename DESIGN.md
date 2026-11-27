@@ -9,10 +9,10 @@ Li-ion power bank on a plane) and, when it runs hot, offers one-click CPU thrott
 
 | Question | Finding | Admin? |
 |---|---|---|
-| Hardware | Dell Latitude 7420, Intel i7-1185G7 (Tiger Lake, 4C/8T, TjMax 100 °C), Win 11 | — |
+| Hardware | Intel 11th-gen mobile CPU (4C/8T, TjMax 100 °C), Dell laptop, Win 11 | — |
 | `MSAcpi_ThermalZoneTemperature` (root\wmi) | **"Not supported"**, and the `Thermal Zone Information` perf counter has **no instances**. The Dell BIOS doesn't expose ACPI thermal zones to Windows. Dead end. | — |
-| Dell WMI | `root\dcim\sysman` namespace exists but has **no sensor classes**: Dell Command \| Monitor is not installed. Unknown whether installing it would expose CPU temp on a 7420. | — |
-| LibreHardwareMonitor | Reads the CPU's own digital thermal sensor (MSR) → per-core + package temp. Current builds use the **PawnIO** driver; the old WinRing0 driver is flagged by Defender as `VulnerableDriver:WinNT/Winring0`, so avoid any build that ships it. **Not yet tested on this laptop.** | **Yes** |
+| Dell WMI | `root\dcim\sysman` namespace exists but has **no sensor classes**: Dell Command \| Monitor is not installed. Unknown whether installing it would expose CPU temp on this laptop. | — |
+| LibreHardwareMonitor | Reads the CPU's own digital thermal sensor (MSR) → per-core + package temp. Current builds use the **PawnIO** driver; the old WinRing0 driver is flagged by Defender as `VulnerableDriver:WinNT/Winring0`, so avoid any build that ships it. **Verified on the test laptop** (LibreHardwareMonitorLib 0.9.6 + PawnIO reads CPU Package). | **Yes** |
 | Charging state | `root\wmi BatteryStatus`: `PowerOnline`, `Charging`, `ChargeRate` (mW). At probe time: online, charging at 19.4 W, battery at 22 %. | No |
 | Power bank vs wall? | **Not distinguishable.** Both arrive as USB-C PD "AC power". Windows doesn't reliably report the negotiated wattage. | — |
 | Throttle lever (superseded, see "What throttle means") | `powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMAX <n>` + `powercfg /setactive SCHEME_CURRENT`. Tested a no-op write (100→100): **works without admin**. Only plan installed: Balanced. Current AC power-mode overlay `961cc777…` (believed to be "Best power efficiency"). | No |
@@ -20,7 +20,7 @@ Li-ion power bank on a plane) and, when it runs hot, offers one-click CPU thrott
 
 **Bottom line:** CPU temperature needs LibreHardwareMonitor, which needs admin. Everything else runs as a normal user.
 
-## Thresholds (i7-1185G7, TjMax 100 °C)
+## Thresholds (TjMax 100 °C)
 
 Raw CPU temps on Intel jump 15–20 °C within a second of a turbo burst, so the app judges a **30 s rolling average** of
 CPU *package* temperature (poll every 5 s, 6 samples), never single samples.
@@ -62,29 +62,33 @@ With Turbo Boost on, the firmware itself pulled the CPU back from 48 W to about 
 narrows on long sustained loads; the big win is removing the 97-99 °C opening spike. Off, the CPU held about
 10 W and 45 °C throughout, at roughly half the speed.
 
-## Proposed stack (minimal)
+## Stack
 
 - **C# / .NET 8 WinForms**, one `NotifyIcon` (tray text such as `CPU 78 °C · charging 19 W`, icon colour = state),
   prompts as top-most dialogs (balloon tips can't carry buttons, and real toasts would add a dependency).
-- **LibreHardwareMonitorLib** (NuGet, PawnIO build) for the temperature, plus plain WMI for charging, plus `powercfg.exe` to throttle.
+- **LibreHardwareMonitorLib** (NuGet, PawnIO build) for the temperature. Charging comes from
+  `CallNtPowerInformation(SystemBatteryState)` (a WMI query every 5 s leaked handles). The throttle is a `powrprof.dll`
+  P/Invoke (`PowerReadACValueIndex` / `PowerWriteACValueIndex`, `PowerSetActiveScheme`), not `powercfg.exe`.
 - **Autostart elevated** through a Task Scheduler task with "Run with highest privileges" at logon, so there's no UAC
   prompt every boot.
-- Roughly 200 lines in one `Program.cs` + an assert-based self-test of the threshold state machine.
+- Files: `Program.cs` (entry, tray app, prompts), `PromptPolicy.cs` (pure "which prompt is due" rules),
+  `ThermalState.cs` (threshold state machine), `Throttle.cs` (boost-mode save/apply/restore), `Sensors.cs`
+  (temperature, charge rate), `TopProcesses.cs`, `SelfTest*.cs` (assert-based self-test).
 - Estimated overhead: about 30–40 MB RAM and well under 1 % CPU at a 5 s poll (estimate, not measured).
 
 Rejected: **Python** (pystray + pythonnet + LHM DLL means more moving parts, and a fragile interpreter path under an
 elevated scheduled task). **Plain LHM GUI** (it shows the temp in the tray but can't prompt or throttle; it's fine as a
 zero-code stopgap).
 
-## Prerequisites (need Tom's OK; none done yet)
+## Prerequisites (done)
 
-- Install the **.NET 8 SDK** (only the runtimes are present now): `winget install Microsoft.DotNet.SDK.8`.
-- **PawnIO driver**: one-time admin install, a kernel driver from a third party. That's the trade-off for getting a temp at all.
-- Verify LHM actually reports `CPU Package` on this 7420 **before** building the rest.
+- **.NET 8 SDK** installed.
+- **PawnIO driver** installed (one-time admin install, a kernel driver from a third party; the trade-off for getting a temp at all).
+- LHM verified to report `CPU Package` on this laptop.
 
-## Open questions for Tom
+## Open questions
 
-1. Prompt-only, or **auto-cap at Hot** (92 °C) if nobody answers within ~1 min (asleep on the flight)?
+1. Decided: strictly prompt-only, no auto-cap at Hot.
 2. OK with the PawnIO kernel driver + elevated autostart? If not, the fallback is to try Dell Command | Monitor
    (Dell-signed, unverified coverage).
 3. Worth showing charge watts (`ChargeRate`) as a power-bank-load proxy? It's free to read. The pack's own temperature
@@ -92,3 +96,13 @@ zero-code stopgap).
 
 Out of scope, but a one-time win: Dell BIOS / Dell Power Manager "Cool" thermal mode and a battery charge limit both
 cut heat and pack draw with no app at all.
+
+## Security notes
+
+- Elevated state and the log live only in the app folder (admin-only under Program Files).
+- The self-contained build and `StartupHookSupport=false` block `DOTNET_ROOT` and startup hooks.
+- Profiler variables (`CORECLR_ENABLE_PROFILING` etc.) are read by the runtime before `Main` and can't be cleared from
+  inside the app, so the scheduled task launches through `cmd.exe /d` with `DOTNET_EnableDiagnostics=0` (per Microsoft's
+  runtime-config docs; not tested here with a real profiler DLL) and `DOTNET_DbgEnableMiniDump=0`, so a crash can't write
+  a dump to a path from the user's environment. The installer sets both before it runs `--restore`.
+- Residual risk: running the exe elevated by hand from a shell whose environment contains profiler variables.

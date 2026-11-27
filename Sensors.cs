@@ -9,6 +9,8 @@ public sealed class Sensors : IDisposable
 {
     private readonly Computer? _pc;
     private readonly IHardware? _cpu;
+    private string? _lastError; // read failures are logged when the message changes, else at most every 10 min
+    private long _lastErrorAt;
 
     public Sensors()
     {
@@ -17,8 +19,9 @@ public sealed class Sensors : IDisposable
             _pc = new Computer { IsCpuEnabled = true };
             _pc.Open();
             _cpu = _pc.Hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Cpu);
+            if (_cpu is null) TrayApp.Log("sensors: no CPU found");
         }
-        catch { _pc = null; }
+        catch (Exception ex) { _pc = null; TrayApp.Log("sensors: open failed: " + ex.Message); }
     }
 
     public double? CpuTempC()
@@ -33,7 +36,17 @@ public sealed class Sensors : IDisposable
             // Without admin the sensors exist but have no value; out-of-range values are treated the same way.
             return sensor?.Value is float v && v > 0 && v < 150 ? v : null;
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            long now = Environment.TickCount64;
+            if (ex.Message != _lastError || now - _lastErrorAt >= 10 * 60 * 1000)
+            {
+                TrayApp.Log("sensors: read failed: " + ex.Message);
+                _lastError = ex.Message;
+                _lastErrorAt = now;
+            }
+            return null;
+        }
     }
 
     /// Watts flowing into the battery, or null if not charging / not available.
