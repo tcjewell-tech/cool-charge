@@ -4,7 +4,7 @@ public enum ThermalState { Normal, Warm, Hot }
 
 public static class Thermal
 {
-    public const double WarmAt = 85, HotAt = 92, ClearAt = 75; // °C, i7-1185G7 (TjMax 100)
+    public const double WarmAt = 85, HotAt = 92, ClearAt = 75; // °C, TjMax 100 °C
     public const double ClearHoldSeconds = 120;
     public const int WindowSamples = 6; // 6 x 5 s poll = 30 s average
 

@@ -46,15 +46,30 @@ if (-not $isAdmin) {
 Get-Process -Name CoolCharge -ErrorAction SilentlyContinue | ForEach-Object { $_.Kill(); [void]$_.WaitForExit(5000) }
 
 # The killed app could not restore Turbo Boost, and removing the folder would delete the record of the
-# original setting. So do the app's "Restore full speed" here: same setting, same saved value.
+# original setting. So have the installed app do its own "Restore full speed" (--restore): it alone knows
+# the marker format. It is a WinExe, so Start-Process -Wait is needed to get its exit code.
 $saved = Join-Path $InstallDir 'saved-boost-mode.txt'
 if (Test-Path -LiteralPath $saved) {
-    $mode = "$(Get-Content -LiteralPath $saved -TotalCount 1)".Trim()
-    if ($mode -notmatch '^[0-6]$') { $mode = '2' }   # same fallback as the app: Windows default
-    & powercfg.exe /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PERFBOOSTMODE $mode
-    if ($LASTEXITCODE -eq 0) { & powercfg.exe /setactive SCHEME_CURRENT }
-    if ($LASTEXITCODE -ne 0) { Stop-WithError 'Could not restore Turbo Boost (powercfg failed). Nothing was removed.' }
-    Remove-Item -LiteralPath $saved -Force
+    $installed = Join-Path $InstallDir 'CoolCharge.exe'
+    if (-not (Test-Path -LiteralPath $installed -PathType Leaf)) {
+        Stop-WithError "Turbo Boost may still be off (found $saved) but $installed is missing, so it cannot be restored. Nothing was removed."
+    }
+    $marker = "$(Get-Content -LiteralPath $saved -TotalCount 1)".Trim()
+    if ($marker -match '^[0-6]$') {
+        # shortcut: a single digit was written by a build without --restore (it would ignore the flag and start the
+        # tray app, hanging -Wait), so restore it here the old way. Drop this branch once no such install remains.
+        $mode = if ($marker -eq '0') { '2' } else { $marker }   # never restore "off"
+        & powercfg.exe /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PERFBOOSTMODE $mode
+        if ($LASTEXITCODE -eq 0) { & powercfg.exe /setactive SCHEME_CURRENT }
+        if ($LASTEXITCODE -ne 0) { Stop-WithError 'Could not restore Turbo Boost (powercfg failed). Nothing was removed.' }
+        Remove-Item -LiteralPath $saved -Force
+    } else {
+        # The child inherits this shell's environment; lock out .NET diagnostics/profilers as the task does.
+        $env:DOTNET_EnableDiagnostics = '0'
+        $env:DOTNET_DbgEnableMiniDump = '0'
+        $p = Start-Process -FilePath $installed -ArgumentList '--restore' -Wait -PassThru
+        if ($p.ExitCode -ne 0) { Stop-WithError "Could not restore Turbo Boost (CoolCharge.exe --restore exited with $($p.ExitCode)). Nothing was removed." }
+    }
     Write-Host 'Turbo Boost was off from the app; restored it to its original setting.'
 }
 
@@ -89,8 +104,21 @@ if ($exe.Contains('%')) { Stop-WithError "Path contains '%' (Task Scheduler woul
 # (anything able to replace the exe or a DLL there would get admin at the next logon). Copy the build
 # into Program Files, which only administrators can modify, and run that copy.
 try {
-    if (Test-Path -LiteralPath $InstallDir) { Remove-Item -LiteralPath $InstallDir -Recurse -Force }
-    Copy-Item -LiteralPath ([IO.Path]::GetDirectoryName($exe)) -Destination $InstallDir -Recurse -Force
+    # Keep log.txt across reinstalls; everything else is replaced.
+    if (Test-Path -LiteralPath $InstallDir) {
+        Get-ChildItem -LiteralPath $InstallDir -Force | Where-Object { $_.Name -ne 'log.txt' } |
+            Remove-Item -Recurse -Force
+    } else {
+        [void](New-Item -ItemType Directory -Path $InstallDir)
+    }
+    # Skip *.txt and *.log: local logs/markers in the build folder must never be installed.
+    $src = [IO.Path]::GetDirectoryName($exe)
+    Get-ChildItem -LiteralPath $src -Recurse -File -Force |
+        Where-Object { $_.Extension -notin '.txt', '.log' } | ForEach-Object {
+            $dest = Join-Path $InstallDir $_.FullName.Substring($src.Length).TrimStart([char]92)
+            [void](New-Item -ItemType Directory -Path (Split-Path -Parent $dest) -Force)
+            Copy-Item -LiteralPath $_.FullName -Destination $dest -Force
+        }
 } catch {
     Stop-WithError "Could not copy the app to $InstallDir (exit CoolCharge from its tray icon first): $($_.Exception.Message)"
 }
@@ -98,8 +126,14 @@ $exe = Join-Path $InstallDir (Split-Path -Leaf $exe)
 
 $user = $identity.Name   # DOMAIN\user of this elevated session
 try {
-    # Quoted path, no arguments: the task cannot run anything but this one file.
-    $action    = New-ScheduledTaskAction -Execute ('"{0}"' -f $exe) -WorkingDirectory ([IO.Path]::GetDirectoryName($exe))
+    # Launched through cmd.exe so DOTNET_EnableDiagnostics=0 (no debugger/profiler/diagnostic IPC) is set
+    # whatever the user's environment says. cmd is addressed by an absolute path from GetFolderPath, not
+    # %SystemRoot%; /d skips cmd's AutoRun (settable under HKCU); no space before && so the value is exactly "0".
+    # The only program started is the installed exe. A console window may flash briefly at logon.
+    $cmd       = Join-Path ([Environment]::GetFolderPath('System')) 'cmd.exe'
+    $action    = New-ScheduledTaskAction -Execute $cmd `
+                    -Argument ('/d /c set DOTNET_EnableDiagnostics=0&& set DOTNET_DbgEnableMiniDump=0&& start "" "{0}"' -f $exe) `
+                    -WorkingDirectory ([IO.Path]::GetDirectoryName($exe))
     $trigger   = New-ScheduledTaskTrigger -AtLogOn -User $user
     $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `

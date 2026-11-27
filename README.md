@@ -28,6 +28,9 @@ From an elevated PowerShell in this folder:
     .\install-task.ps1 -Uninstall  # removes it
 
 The task is created for the account running the script. Pass `-ExePath` if the exe is somewhere else.
+`log.txt` is kept across reinstalls and removed by `-Uninstall`. The task starts the app through `cmd.exe` with .NET
+diagnostics and profiling disabled (`DOTNET_EnableDiagnostics=0`), so a profiler injected through the user's
+environment cannot load into the elevated process; a console window may flash at logon.
 
 ## Thresholds
 
@@ -41,12 +44,13 @@ Details and reasoning are in [DESIGN.md](DESIGN.md).
 
 ## Command-line flags
 
-- `--selftest` runs the built-in checks of the threshold logic and exits (0 = pass). It has no console window, so
+- `--selftest` runs the built-in checks (threshold logic, Turbo Boost save/restore, prompt timing) and exits (0 = pass). It has no console window, so
   pipe the output to see it: `CoolCharge.exe --selftest 2>&1 | more`
 - `--simulate <tempC>` uses a fake CPU temperature instead of the sensor, so you can try the prompts without heating
   the laptop. Example: `CoolCharge.exe --simulate 90`. Expect the first prompt after about 30 seconds,
   because the average needs 6 readings. In this mode the tray menu also has "Simulate 70 °C", "Simulate 87 °C" and
   "Simulate 94 °C" to change the fake temperature while it runs.
+- `--restore` restores the saved Turbo Boost setting and exits (0 = success, 1 = failure). The installer uses it.
 
 ## What the throttle does
 
@@ -55,17 +59,23 @@ CPU work by about 17 % in a single-thread test. Under a 2.5-minute all-core load
 and 24 W average to a 55 °C peak and 10 W, at about half the speed (details in DESIGN.md). Only the plugged-in
 value is changed, so battery behaviour stays as it was.
 
-The more common "Maximum processor state" cap is not used: measured on this Latitude 7420 it had no effect at any
+The more common "Maximum processor state" cap is not used: measured on this laptop it had no effect at any
 value, even 5 %.
 
-"Restore full speed" puts back the value that was saved before. The app also restores it when you choose Exit and at
+"Restore full speed" puts back the setting saved before Turbo Boost was turned off, into the power plan that was
+active at that moment. If Turbo Boost was already off when CoolCharge took over, it restores the Windows default
+(Aggressive) instead, never "off". The app also restores it when you choose Exit and at
 logoff or shutdown. After a crash or a kill Turbo Boost stays off; the next start shows a warning, and "Restore full
-speed" in the tray menu undoes it. The original value and `log.txt` (one line per state change or action) are kept
+speed" in the tray menu undoes it. The original value and `log.txt` (state changes, actions, plug and sleep events, sensor errors) are kept
 next to the installed program in `Program Files\CoolCharge` when it runs as administrator, and in
 `%LOCALAPPDATA%\CoolCharge` when it does not.
 
-A prompt's default button is always "Snooze 15 min", so a stray Enter never changes a setting. While the CPU stays
-warm or hot with Turbo Boost still on, the prompt comes back every 15 minutes.
+A prompt's default button is always "Snooze 15 min" (for the restore prompt, "Keep it off"), so a stray Enter never
+changes a setting. While the CPU stays warm or hot with Turbo Boost still on, the prompt comes back every 15 minutes.
+Snooze timing uses elapsed time, so clock or time-zone changes don't stretch it. Turning Turbo Boost off (from the
+prompt or the tray menu) stops the 15-minute Warm reminders; entering Hot still asks. After sleep, unplugging or a
+sensor dropout while Turbo Boost is off, the app offers "Restore full speed" once readings are back to Normal.
+"End process…" refuses Windows' own critical processes.
 
 ## Limits
 
